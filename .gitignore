@@ -1,0 +1,17 @@
+# 本地凭证与运行产物，不要提交
+config.json
+logs/
+*.log
+__pycache__/
+*.pyc
+.trae/
+
+# PyInstaller 中间产物
+build/
+dist/签到助手.exe
+签到助手.spec
+
+# 编辑器 / 测试缓存
+.pytest_cache/
+.idea/
+.vscode/

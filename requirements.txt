@@ -1,0 +1,4 @@
+# 运行签到脚本本身零依赖（只用 Python 标准库，无需 pip install）
+# 下面两个是 GUI 兜底（python run.py teach / 点击客户端按钮）才需要的可选依赖
+# pyautogui
+# pygetwindow

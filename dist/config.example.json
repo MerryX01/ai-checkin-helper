@@ -1,0 +1,38 @@
+﻿{
+  "trae": {
+    "enabled": false,
+    "gui_fallback": true,
+    "token": "",
+    "device_id": "",
+    "base_url": "https://api.trae.cn",
+    "gui_click": null
+  },
+  "qoder": {
+    "enabled": false,
+    "base_url": "https://gateway.qoder.com.cn"
+  },
+  "workbuddy": {
+    "enabled": false,
+    "base_url": "https://www.codebuddy.cn"
+  },
+  "doubao": {
+    "enabled": true,
+    "app_path": "",
+    "profile": ""
+  },
+  "notify": {
+    "enabled": false,
+    "type": "wecom",
+    "url": ""
+  },
+  "runtime": {
+    "timeout": 20,
+    "retries": 3,
+    "backoff": 1.0,
+    "log_dir": "logs"
+  },
+  "ui": {
+    "time": "10:10"
+  }
+}
+
