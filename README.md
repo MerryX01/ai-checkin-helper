@@ -58,7 +58,7 @@ python run.py quota --only trae,qoder
 > 单独勾选：点平台卡片左侧的小方框，只切换这一家；点卡片主体只是切换右侧设置面板，不会误改勾选状态。
 > 「全选 / 全不选」适合批量操作，日常只跑几家时逐个点方框即可。
 
-### 给别的电脑用：打包好的 exe
+### 打包好的 exe
 
 `dist\签到助手.exe` 是单文件、免装 Python 的版本（PyInstaller 打包，窗口程序，不弹黑窗）：
 
@@ -127,31 +127,13 @@ sign_in\
 
 ---
 
-## 加一个平台
-
-新建 `signin\platforms\<名字>.py`，定义一份 `PlatformSpec` 并 `register()`，然后什么都不用改：
-
-- `config.json` 的默认值 → 由 `fields` + `defaults` 自动生成
-- 界面右侧面板的输入框、勾选框、按钮 → 由 `fields` + `actions` 自动生成
-- 环境变量映射 → 由 `FieldSpec.env` 自动生成
-- `run.py platforms` / `--only` 的取值 → 由注册表自动生成
-
-详见 `docs\ADDING_A_PLATFORM.md`。
-
----
-
-## 验证
-
-```bat
-python -m unittest discover -s tests -t .
-python -m compileall -q signin run.py gui_app.py app_main.py
-py -3 gui_app.py --selftest
-```
-
----
-
 ## 注意
 
 - 凭证始终留在本机，程序只读不写、不上传。
 - 定时任务用 `wscript.exe` 拉起 `run_hidden.vbs`，运行时不会弹黑窗口。
 - 想清掉登录态？在对应客户端里退出登录即可，程序下一次就会提示"去客户端登录一次"。
+
+##  学习交流分享
+
+   <img width="888" height="1131" alt="f2c4149e6261d746d84a98a7ce60f60d" src="https://github.com/user-attachments/assets/7948f180-1b13-4b6e-a487-68e3714c92ba" />
+
