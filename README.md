@@ -61,7 +61,7 @@ python run.py quota --only trae,qoder
 > 单独勾选：点平台卡片左侧的小方框，只切换这一家；点卡片主体只是切换右侧设置面板，不会误改勾选状态。
 > 「全选 / 全不选」适合批量操作，日常只跑几家时逐个点方框即可。
 
-### 给别的电脑用：打包好的 exe
+### 打包好的 exe
 
 `dist\签到助手.exe` 是单文件、免装 Python 的版本（PyInstaller 打包，窗口程序，不弹黑窗）：
 
@@ -86,7 +86,6 @@ python run.py teach trae         :: 校准 Trae 的签到按钮坐标
 python run.py install-task --time 10:10
 python run.py uninstall-task
 ```
-
 ---
 
 ## 工程结构（桌面根目录下的完整项目）
@@ -127,29 +126,6 @@ sign_in\
 ```
 
 依赖：**只用标准库**。不需要 pip install 任何东西（`cryptography` 只在开发期用来和自研 AES 实现做对拍）。
-
----
-
-## 加一个平台
-
-新建 `signin\platforms\<名字>.py`，定义一份 `PlatformSpec` 并 `register()`，然后什么都不用改：
-
-- `config.json` 的默认值 → 由 `fields` + `defaults` 自动生成
-- 界面右侧面板的输入框、勾选框、按钮 → 由 `fields` + `actions` 自动生成
-- 环境变量映射 → 由 `FieldSpec.env` 自动生成
-- `run.py platforms` / `--only` 的取值 → 由注册表自动生成
-
-详见 `docs\ADDING_A_PLATFORM.md`。
-
----
-
-## 验证
-
-```bat
-python -m unittest discover -s tests -t .
-python -m compileall -q signin run.py gui_app.py app_main.py
-py -3 gui_app.py --selftest
-```
 
 ---
 
