@@ -67,27 +67,9 @@ python run.py quota --only trae,qoder
 3. 点「注册定时任务」即可每天自动跑——计划任务里登记的是 exe 自己的路径。
 
 exe 的配置和日志都放在 exe 同目录（`config.json`、`logs\checkin.log`），无需管理员权限。
+新版 exe 在 GitHub 仓库的 Releases（正式发版）或 Actions 构建产物（每次推送的最新构建）里下载。
 
-### GitHub 迭代 / 自动打包
-
-仓库推送到 GitHub 后，`.github\workflows\build-exe.yml` 会自动跑测试、编译并构建 Windows exe：
-
-- 推送 `main` / `dev` 分支或手动触发 `workflow_dispatch`：自动构建，产物在 Actions 的 `signin-exe` artifact 里，**不需要改版本号**；
-- 推送 `v*` 标签：额外创建 GitHub Release，附上 `签到助手.exe`、`使用说明.txt`、`config.example.json`——只有正式发版给别人下载时才需要打标签。
-
-日常开发在 `dev` 分支提交推送即可，每次推送都会云端构建最新 exe；稳定后合回 `main`。
-本地发版可以用：
-
-```bat
-powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Version 2.2.2
-git push origin HEAD
-git push origin v2.2.2
-```
-
-`release.ps1` 会同步版本号、跑全量测试、编译、构建 exe、提交并打标签；加 `-Push` 可直接推送。
-`dist\签到助手.exe` 与 `build\` 不进 git，Release 附件才是给其他人下载的版本。
-
-命令行等价操作：
+### 命令行用法
 
 ```bat
 python run.py run                :: 真正签到（全部已勾选的平台）
