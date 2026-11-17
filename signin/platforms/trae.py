@@ -356,12 +356,28 @@ def _num(value):
         return None
 
 
+def _gui_click_ready(section: dict) -> bool:
+    """是否已校准「点客户端按钮」兜底：窗口名 + 两个相对坐标都在才算数。"""
+    click = section.get("gui_click") or {}
+    if not click.get("window"):
+        return False
+    try:
+        return 0 <= float(click.get("x_ratio", -1)) <= 1 and 0 <= float(click.get("y_ratio", -1)) <= 1
+    except (TypeError, ValueError):
+        return False
+
+
 def check(section: dict) -> list[str]:
     if (section.get("token") or "").strip():
+        return []
+    # 读不到客户端登录态时，「开启兜底 + 已校准点击位置」也算已配置，和 run() 的兜底分支对齐
+    if section.get("gui_fallback") and _gui_click_ready(section):
         return []
     state = login_state()
     if state.ok:
         return []
+    if section.get("gui_fallback") and not _gui_click_ready(section):
+        return ["已开启点击兜底，但还没校准签到按钮位置：运行 teach trae 或在界面上点「校准点击位置」"]
     return [state.message or "先在 Trae CN 客户端登录一次"]
 
 

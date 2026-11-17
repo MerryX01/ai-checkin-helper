@@ -115,6 +115,7 @@ class ProblemsTest(unittest.TestCase):
     def test_trae_gui_click_counts_as_configured(self):
         form = _form()
         form['enabled']['trae'] = True
+        form['trae']['gui_fallback'] = True
         form['trae']['gui_click'] = {'window': 'Trae CN', 'x_ratio': 0.5, 'y_ratio': 0.9}
         problems = settings.problems(form)
         self.assertFalse(any('Trae' in text for _, text in problems))
