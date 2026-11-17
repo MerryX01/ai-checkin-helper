@@ -11,12 +11,12 @@
 电脑上装了客户端，客户端登录后会把登录凭证加密存在自己的目录里（Windows 上用 DPAPI + AES-256-GCM）。
 本工程直接用 Python 把这份凭证读出来用，所以对用户来说只是"我在客户端登录过"。
 
-| 平台 | 你只需要 | 程序从哪拿凭证 | 当前状态 |
+| 平台 | 你只需要 | 程序从哪拿凭证 | 状态 |
 |---|---|---|---|
-| **WorkBuddy** | 在 WorkBuddy（客户端目录叫 CodeBuddy CN）登录一次 | `%APPDATA%\CodeBuddy CN\User\globalStorage\state.vscdb` 里的 accessToken，自动解密 | 实测签到成功 |
-| **Qoder** | 在 Qoder 客户端登录一次 | `%APPDATA%\com.qodercn.app.stable\auth.v1.dat`，用本机主密钥解密出 token；活动接口在 `gateway.qoder.com.cn`，必须带 `Cosy-ClientType: 10` | ✅ 实测领到 **+100 Credits**（余额 103 → 203，30 天有效） |
-| **豆包** | 在豆包客户端登录一次 | `%LOCALAPPDATA%\Doubao\User Data\Profile 3\Network\Cookies`（v10 密文，自动解密成 Cookie，读时剔除过期项）→ 任务面板 + DirectClaim 奖励接口，领取后回读 `checked_in_today` 确认 | ✅ 登录态与任务面板已实测读取；当前账号领取接口受理后平台一直「确认中」不发放（实测重试无效），程序如实报「跳过」并引导客户端验证，不假成功 |
-| **Trae CN** | 在 Trae CN 客户端登录一次 | 解开 `%APPDATA%\Trae CN\User\globalStorage\storage.json` 里的加密信封（AES-128-CBC + sha512 派生密钥），拿到 Cloud-IDE-JWT 和真实设备号；CLI 的 `~/.trae-cn/trae-jwt-token` 也能用 | ✅ 实测签到成功（+200 积分） |
+| **WorkBuddy** | 在 WorkBuddy（客户端目录叫 CodeBuddy CN）登录一次 | `%APPDATA%\CodeBuddy CN\User\globalStorage\state.vscdb` 里的 accessToken，自动解密 | 自动签到 |
+| **Qoder** | 在 Qoder 客户端登录一次 | `%APPDATA%\com.qodercn.app.stable\auth.v1.dat`，用本机主密钥解密出 token；活动接口在 `gateway.qoder.com.cn`，必须带 `Cosy-ClientType: 10` | 自动签到（+100 Credits/日） |
+| **豆包** | 在豆包客户端登录一次 | `%LOCALAPPDATA%\Doubao\User Data\Profile 3\Network\Cookies`（v10 密文，自动解密成 Cookie，读时剔除过期项）→ 任务面板 + DirectClaim 奖励接口，领取后回读 `checked_in_today` 确认 | 自动签到；以平台回读为准，未确认到账不报成功 |
+| **Trae CN** | 在 Trae CN 客户端登录一次 | 解开 `%APPDATA%\Trae CN\User\globalStorage\storage.json` 里的加密信封（AES-128-CBC + sha512 派生密钥），拿到 Cloud-IDE-JWT 和真实设备号；CLI 的 `~/.trae-cn/trae-jwt-token` 也能用 | 自动签到（+200 积分/日） |
 
 Trae 的登录信息是客户端自己的加密格式，本工程用纯 Python 复刻了解密（算法来自公开实现 G57651/dsh-dual-checkin，MIT），
 所以同样是「登录一次就行」，不需要令牌、不需要校准。只有在读不到登录态时，才保留「点客户端按钮」作为可选的兜底（默认关闭）。
@@ -50,7 +50,7 @@ python run.py quota --only trae,qoder
 
 ## 开始用（3 步）
 
-1. **装 Python 3**（勾选 tcl/tk）。本机已验证：`C:\Users\Merry\AppData\Local\Programs\Python\Python312\python.exe`。
+1. **装 Python 3**（勾选 tcl/tk）。
 2. **双击 `启动界面.cmd`** —— 它会自动挑一个带 tkinter 的解释器（pyw -3 → Python312 → pythonw → py → python），
    全都不行才弹窗报错，不会"双击没反应"。
 3. 在界面上勾选平台（支持多选，也可以「全选 / 全不选」）→ 点「立即签到」验证一次 → 点「注册定时任务」（默认 10:10，Qoder 的当日资格 10:00 后才放出）。
@@ -70,11 +70,12 @@ exe 的配置和日志都放在 exe 同目录（`config.json`、`logs\checkin.lo
 
 ### GitHub 迭代 / 自动打包
 
-仓库推送到 GitHub 后，`.github\workflows\build-exe.yml` 会在两种情况下自动跑测试、编译并构建 Windows exe：
+仓库推送到 GitHub 后，`.github\workflows\build-exe.yml` 会自动跑测试、编译并构建 Windows exe：
 
-- 手动触发 `workflow_dispatch`：产物在 Actions 的 `signin-exe` artifact 里；
-- 推送 `v*` 标签：自动创建 GitHub Release，并附上 `签到助手.exe`、`使用说明.txt`、`config.example.json`。
+- 推送 `main` / `dev` 分支或手动触发 `workflow_dispatch`：自动构建，产物在 Actions 的 `signin-exe` artifact 里，**不需要改版本号**；
+- 推送 `v*` 标签：额外创建 GitHub Release，附上 `签到助手.exe`、`使用说明.txt`、`config.example.json`——只有正式发版给别人下载时才需要打标签。
 
+日常开发在 `dev` 分支提交推送即可，每次推送都会云端构建最新 exe；稳定后合回 `main`。
 本地发版可以用：
 
 ```bat
@@ -135,7 +136,7 @@ sign_in\
 │  ├─ run_daily.ps1      定时任务实际执行的脚本
 │  ├─ run_hidden.vbs     无窗口拉起（计划任务用）
 │  └─ install_task.ps1   注册/删除计划任务
-├─ tests\                150 个单测
+├─ tests\                155 个单测
 ├─ logs\                 checkin.log / checkin_history.jsonl / ui_launch.log / checkin_console.log
 └─ dist\                 发布包：签到助手.exe + 使用说明.txt + config.example.json
 ```
@@ -160,31 +161,10 @@ sign_in\
 ## 验证
 
 ```bat
-python -m unittest discover -s tests -t .      :: 150 tests OK
+python -m unittest discover -s tests -t .
 python -m compileall -q signin run.py gui_app.py app_main.py
-py -3 gui_app.py --selftest                    :: UI-OK panels=4 cards=4 scale=2.0 fields=8 + DASH-OK rows=4
+py -3 gui_app.py --selftest
 ```
-
-本机实测记录（2026-11-17）：
-
-```
-Qoder       今日已签  今日已领 100 Credits（已到账，30 天有效）
-WorkBuddy   今日已签  今天 +100 积分已到账（连续 17 天；额度看板同日显示 +100）
-Trae CN     签到成功  +200 积分（登录态自动读取，未填任何令牌）
-豆包        跳过      领取接口受理但平台反复回「领取结果确认中」，实测重试多次均不到账；
-                      建议在豆包客户端 UI 里手动签一次验证（不假报成功）
-```
-
-> 豆包误判复盘（2026-11-17）：本机是**个人账号**（额度接口回「个人订阅」），之前误报「飞书/企业
-> 登录态」是因为 10-28 点过一次「免费用豆包工作」，过期的 `LARK_SUITE_*` Cookie 残留在库里被
-> 照单全收。现在读 Cookie 时按浏览器行为剔除过期项，个人号不再误判；真企业登录态（飞书 SSO）
-> 仍然如实报「无资格」。另实测：豆包客户端运行时会独占 Cookies 库，脚本会重试并提示先退出客户端。
-
-> 2026-11-16 修复：Qoder 之前会"假成功"——请求的是 `openapi.qoder.com.cn` 且少了 `Cosy-ClientType`
-> 头，接口返回空活动列表，被误判成"今日已签"。现在改打 `gateway.qoder.com.cn` + 正确请求头，
-> 并区分「领取成功 / 今日已领 / 今天活动没放出」三种状态。真机领取后余额从 103 涨到 203（+100）。
-
-exe 实测（`dist\签到助手.exe`，从别的目录启动）：`run --only trae` 退出码 0，日志写在 exe 旁边的 `logs\checkin.log`。
 
 ---
 
