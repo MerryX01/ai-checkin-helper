@@ -670,6 +670,10 @@ class SignInApp:
             self._log("没抓到窗口，校准失败", "err")
             return
         self.cfg.setdefault(key, {})["gui_click"] = point
+        # 校准即启用点击兜底，避免保存配置时被表单默认值关掉
+        self.cfg[key]["gui_fallback"] = True
+        if "gui_fallback" in self.form[key]:
+            self.form[key]["gui_fallback"] = True
         self.form[key]["gui_click_ready"] = True
         self._save(silent=True)
         self._log(f"已校准：窗口「{point['window']}」 位置 {point['x_ratio']:.2f}/{point['y_ratio']:.2f}", "ok")
