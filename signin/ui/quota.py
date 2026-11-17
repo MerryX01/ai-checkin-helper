@@ -273,7 +273,10 @@ class QuotaDashboard:
         self._insert(f"  已用        {snap.fmt_used()}{unit}\n", "body")
         self._insert(f"  使用率      {snap.fmt_percent()}\n", "body")
         today = snap.fmt_today()
-        self._insert(f"  今日签到    {today}\n", "ok" if snap.today_earned is not None else "body")
+        today_tag = "ok" if snap.today_earned is not None else "muted"
+        self._insert(f"  今日签到    {today}\n", today_tag)
+        if snap.today_text and snap.today_earned is None:
+            self._insert(f"              {self._today_hint(snap.today_text)}\n", "muted")
         if snap.expire_at:
             self._insert(f"  到期        {snap.expire_at}\n", "body")
 
@@ -288,6 +291,16 @@ class QuotaDashboard:
 
     def _insert(self, text: str, tag: str = "body") -> None:
         self.detail.insert("end", text, tag)
+
+    @staticmethod
+    def _today_hint(text: str) -> str:
+        """把「今日签到」列里的短状态翻译成明细里的人话。"""
+        return {
+            "无资格": "这个账号没有个人版每日签到活动（工作版/飞书企业号）",
+            "已签": "今天已签到；平台没有返回本次具体积分，不猜数字",
+            "需登录": "登录态失效，需要重新登录一次客户端",
+            "失败": "本次签到失败，鼠标悬停主界面可看具体原因",
+        }.get(str(text), "")
 
     # ------------------------------------------------------------ 收尾
     def lift(self) -> None:

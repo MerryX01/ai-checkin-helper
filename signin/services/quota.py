@@ -32,9 +32,17 @@ def collect(cfg: dict, client=None, specs=None, results: dict | None = None,
             snap = QuotaSnapshot(spec.key, Status.FAILED, "额度适配器没有返回 QuotaSnapshot")
 
         result = (results or {}).get(spec.key)
-        if (isinstance(result, CheckinResult) and result.is_ok
-                and result.credits is not None):
-            snap.today_earned = result.credits
+        if isinstance(result, CheckinResult):
+            if result.is_ok and result.credits is not None:
+                snap.today_earned = result.credits
+            elif result.status == Status.SKIPPED and result.detail.get("no_activity"):
+                snap.today_text = snap.today_text or "无资格"
+            elif result.is_ok:
+                snap.today_text = snap.today_text or "已签"
+            elif result.status == Status.NEED_SETUP:
+                snap.today_text = snap.today_text or "需登录"
+            elif result.status == Status.FAILED:
+                snap.today_text = snap.today_text or "失败"
         snapshots.append(snap)
     return snapshots
 

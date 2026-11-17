@@ -15,7 +15,7 @@
 |---|---|---|---|
 | **WorkBuddy** | 在 WorkBuddy（客户端目录叫 CodeBuddy CN）登录一次 | `%APPDATA%\CodeBuddy CN\User\globalStorage\state.vscdb` 里的 accessToken，自动解密 | 实测签到成功 |
 | **Qoder** | 在 Qoder 客户端登录一次 | `%APPDATA%\com.qodercn.app.stable\auth.v1.dat`，用本机主密钥解密出 token；活动接口在 `gateway.qoder.com.cn`，必须带 `Cosy-ClientType: 10` | ✅ 实测领到 **+100 Credits**（余额 103 → 203，30 天有效） |
-| **豆包** | 在豆包客户端登录一次 | `%LOCALAPPDATA%\Doubao\User Data\Profile 3\Network\Cookies`（v10 密文，自动解密成 Cookie）→ 任务面板 + DirectClaim 奖励接口，领取后回读 `checked_in_today` 确认 | ✅ 登录态与任务面板已实测读取；当前账号活动 `phase=settled`，奖励接口回「确认中」且未到账，程序如实报「跳过」，不假成功 |
+| **豆包** | 在豆包客户端登录一次 | `%LOCALAPPDATA%\Doubao\User Data\Profile 3\Network\Cookies`（v10 密文，自动解密成 Cookie，读时剔除过期项）→ 任务面板 + DirectClaim 奖励接口，领取后回读 `checked_in_today` 确认 | ✅ 登录态与任务面板已实测读取；当前账号领取接口受理后平台一直「确认中」不发放（实测重试无效），程序如实报「跳过」并引导客户端验证，不假成功 |
 | **Trae CN** | 在 Trae CN 客户端登录一次 | 解开 `%APPDATA%\Trae CN\User\globalStorage\storage.json` 里的加密信封（AES-128-CBC + sha512 派生密钥），拿到 Cloud-IDE-JWT 和真实设备号；CLI 的 `~/.trae-cn/trae-jwt-token` 也能用 | ✅ 实测签到成功（+200 积分） |
 
 Trae 的登录信息是客户端自己的加密格式，本工程用纯 Python 复刻了解密（算法来自公开实现 G57651/dsh-dual-checkin，MIT），
@@ -32,7 +32,7 @@ Trae 的登录信息是客户端自己的加密格式，本工程用纯 Python �
 | Trae CN | 余额、总量、已用、使用率、签到权益包 | `POST /trae/api/v2/pay/ide_user_ent_usage` |
 | Qoder | 附加额度余额 / 总量 / 已用、总使用率、到期 | `GET /sash/api/v2/me/usage` |
 | WorkBuddy | 套餐/奖励积分分组、余额、总量、已用 | `POST /billing/meter/get-user-resource-summary` |
-| 豆包 | 活动赠送额度总量、已用、到期、额度记录；平台只返回「已用 <1」时余额显示「—」 | `POST /alice/commerce/sale/subscription/quota/summary/` + `quota/records` |
+| 豆包 | 活动赠送额度总量、已用、到期、额度记录；平台只返回「已用 <1」时显示余额下限「≥199」，不伪造精确值 | `POST /alice/commerce/sale/subscription/quota/summary/` + `quota/records` |
 
 - 看板只读，不会触发签到；没有返回的字段显示「—」，不猜测。
 - 选中表格中的一行，下方显示该平台的额度构成/记录明细和具体数据源。
@@ -78,9 +78,9 @@ exe 的配置和日志都放在 exe 同目录（`config.json`、`logs\checkin.lo
 本地发版可以用：
 
 ```bat
-powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Version 2.2.1
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Version 2.2.2
 git push origin HEAD
-git push origin v2.2.1
+git push origin v2.2.2
 ```
 
 `release.ps1` 会同步版本号、跑全量测试、编译、构建 exe、提交并打标签；加 `-Push` 可直接推送。
@@ -116,7 +116,9 @@ sign_in\
 ├─ CHANGELOG.md
 ├─ README.md
 ├─ docs\
+│  ├─ architecture.png        分层架构图（scripts\draw_architecture.py 生成）
 │  ├─ ARCHITECTURE.md         分层与数据流
+│  ├─ PRINCIPLES_AND_COMPARISON.md  原理 / 封号风险 / 与 dsh-checkin-all 对比
 │  ├─ ADDING_A_PLATFORM.md    加一个平台要改什么（只改一个文件）
 │  └─ TROUBLESHOOTING.md      常见故障
 ├─ signin\
@@ -133,7 +135,7 @@ sign_in\
 │  ├─ run_daily.ps1      定时任务实际执行的脚本
 │  ├─ run_hidden.vbs     无窗口拉起（计划任务用）
 │  └─ install_task.ps1   注册/删除计划任务
-├─ tests\                138 个单测
+├─ tests\                150 个单测
 ├─ logs\                 checkin.log / checkin_history.jsonl / ui_launch.log / checkin_console.log
 └─ dist\                 发布包：签到助手.exe + 使用说明.txt + config.example.json
 ```
@@ -158,19 +160,25 @@ sign_in\
 ## 验证
 
 ```bat
-python -m unittest discover -s tests -t .      :: 138 tests OK
+python -m unittest discover -s tests -t .      :: 150 tests OK
 python -m compileall -q signin run.py gui_app.py app_main.py
 py -3 gui_app.py --selftest                    :: UI-OK panels=4 cards=4 scale=2.0 fields=8 + DASH-OK rows=4
 ```
 
-本机实测记录（2026-11-16）：
+本机实测记录（2026-11-17）：
 
 ```
 Qoder       今日已签  今日已领 100 Credits（已到账，30 天有效）
-WorkBuddy   签到成功  签到成功（再次运行 → 今日已签，幂等）
+WorkBuddy   今日已签  今天 +100 积分已到账（连续 17 天；额度看板同日显示 +100）
 Trae CN     签到成功  +200 积分（登录态自动读取，未填任何令牌）
-豆包        跳过      登录 Cookie 与任务面板已自动读到；账号活动 phase=settled，奖励接口回「领取结果确认中」但始终未到账（不假报成功）
+豆包        跳过      领取接口受理但平台反复回「领取结果确认中」，实测重试多次均不到账；
+                      建议在豆包客户端 UI 里手动签一次验证（不假报成功）
 ```
+
+> 豆包误判复盘（2026-11-17）：本机是**个人账号**（额度接口回「个人订阅」），之前误报「飞书/企业
+> 登录态」是因为 10-28 点过一次「免费用豆包工作」，过期的 `LARK_SUITE_*` Cookie 残留在库里被
+> 照单全收。现在读 Cookie 时按浏览器行为剔除过期项，个人号不再误判；真企业登录态（飞书 SSO）
+> 仍然如实报「无资格」。另实测：豆包客户端运行时会独占 Cookies 库，脚本会重试并提示先退出客户端。
 
 > 2026-11-16 修复：Qoder 之前会"假成功"——请求的是 `openapi.qoder.com.cn` 且少了 `Cosy-ClientType`
 > 头，接口返回空活动列表，被误判成"今日已签"。现在改打 `gateway.qoder.com.cn` + 正确请求头，

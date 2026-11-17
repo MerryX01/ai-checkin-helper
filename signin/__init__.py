@@ -8,7 +8,7 @@
 """
 from pathlib import Path
 
-VERSION = "2.2.1"
+VERSION = "2.2.2"
 
 # 工程根目录（config.json、logs、scripts 都相对它）
 ROOT = Path(__file__).resolve().parent.parent

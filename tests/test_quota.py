@@ -92,6 +92,23 @@ WORKBUDDY_USAGE = {
     },
 }
 
+WORKBUDDY_STATUS = {
+    "code": 0,
+    "msg": "OK",
+    "data": {
+        "active": True,
+        "today_checked_in": True,
+        "streak_days": 17,
+        "daily_credit": 100,
+        "today_credit": 100,
+        "total_credits": 1700,
+        "checkin_dates": ["2026-11-17", "2026-11-16"],
+        "week_checkin_days": 2,
+        "activity_name": "Buddy应用",
+        "end_time": "2026-12-31 23:59:59",
+    },
+}
+
 DOUBAO_QUOTA = {
     "code": 0,
     "data": {
@@ -205,16 +222,96 @@ class DoubaoQuotaTest(unittest.TestCase):
         self.assertEqual(snap.status, Status.OK)
         self.assertEqual(snap.total, 200)
         self.assertIsNone(snap.balance)
+        self.assertEqual(snap.fmt_balance(), "≥199")
         self.assertEqual(snap.used, 0)
         self.assertEqual(snap.used_text, "<1")
         self.assertTrue(any("每日签到" in value for _, value in snap.details))
-        self.assertIn("未返回精确剩余", snap.message)
+        self.assertIn("不足 1", snap.message)
+        self.assertEqual(snap.fmt_today(), "—")
+
+    def test_feishu_account_marks_no_qualification(self):
+        client = FakeClient([FakeResponse(payload=DOUBAO_QUOTA), FakeResponse(payload=DOUBAO_RECORDS)])
+        snap = doubao.quota(client, {"cookie": "sessionid=x; LARK_SUITE_ACCESS_TOKEN=y", "seed": "s"})
+        self.assertEqual(snap.status, Status.OK)
+        self.assertEqual(snap.fmt_today(), "无资格")
+        self.assertIn("企业", snap.message)
+        self.assertIn("工作版", snap.message)
+        self.assertTrue(any(label == "账号类型" for label, _ in snap.details))
+
+    def test_personal_account_leftover_keypair_is_not_enterprise(self):
+        """个人号残留 feishu_dpop_keypair 不再被误判成企业登录态（实测 2026-11）。"""
+        client = FakeClient([FakeResponse(payload=DOUBAO_QUOTA), FakeResponse(payload=DOUBAO_RECORDS)])
+        snap = doubao.quota(client, {"cookie": "sessionid=x; feishu_dpop_keypair=y", "seed": "s"})
+        self.assertEqual(snap.status, Status.OK)
+        self.assertEqual(snap.fmt_today(), "—")
+        self.assertNotIn("企业", snap.message)
+
+    def test_today_record_sets_today_earned(self):
+        import datetime
+        today_ms = int(datetime.datetime.now().timestamp() * 1000)
+        records = {"code": 0, "data": {"records": [
+            {"amount": "200", "create_time_ms": today_ms,
+             "task_code": "daily_signin", "task_name": "每日签到", "unit": "POINT"},
+        ]}}
+        client = FakeClient([FakeResponse(payload=DOUBAO_QUOTA), FakeResponse(payload=records)])
+        snap = doubao.quota(client, {"cookie": "sessionid=x", "seed": "seed"})
+        self.assertEqual(snap.today_earned, 200)
+        self.assertEqual(snap.fmt_today(), "+200")
 
     def test_missing_cookie_is_need_setup(self):
         client = FakeClient([])
         with patch.object(doubao, "login_state", return_value=LoginState(False, message="not logged in")):
             snap = doubao.quota(client, {})
         self.assertEqual(snap.status, Status.NEED_SETUP)
+
+
+class WorkBuddyStatusQuotaTest(unittest.TestCase):
+    def test_status_credit_is_merged_even_without_a_checkin_run(self):
+        client = FakeClient([FakeResponse(payload=WORKBUDDY_USAGE),
+                             FakeResponse(payload=WORKBUDDY_STATUS)])
+        snap = workbuddy.quota(client, {"base_url": "https://www.codebuddy.cn", "token": "tok"})
+        self.assertEqual(snap.status, Status.OK)
+        self.assertEqual(snap.today_earned, 100)
+        self.assertEqual(snap.fmt_today(), "+100")
+        self.assertTrue(any("连续签到" == label for label, _ in snap.details))
+        self.assertTrue(any("今日签到" == label for label, _ in snap.details))
+
+
+class TodayTextTest(unittest.TestCase):
+    def test_today_text_is_used_when_no_amount(self):
+        snap = quota_service.QuotaSnapshot("workbuddy", Status.ALREADY, today_text="已签")
+        self.assertEqual(snap.fmt_today(), "已签")
+        self.assertEqual(snap.as_dict()["today_text"], "已签")
+
+    def test_amount_wins_over_text(self):
+        snap = quota_service.QuotaSnapshot("workbuddy", Status.OK, today_earned=100,
+                                           today_text="已签")
+        self.assertEqual(snap.fmt_today(), "+100")
+
+    def test_skipped_no_activity_becomes_unqualified(self):
+        class Spec:
+            key = "doubao"
+
+            def quota(self, client, section):
+                return quota_service.QuotaSnapshot("doubao", Status.OK, balance=1)
+
+        results = {"doubao": CheckinResult("doubao", Status.SKIPPED,
+                                          detail={"no_activity": True})}
+        got = quota_service.collect({"doubao": {}}, client=FakeClient([]),
+                                    specs=[Spec()], results=results)
+        self.assertEqual(got[0].fmt_today(), "无资格")
+
+    def test_already_without_credit_shows_signed(self):
+        class Spec:
+            key = "workbuddy"
+
+            def quota(self, client, section):
+                return quota_service.QuotaSnapshot("workbuddy", Status.OK, balance=1)
+
+        results = {"workbuddy": CheckinResult("workbuddy", Status.ALREADY)}
+        got = quota_service.collect({"workbuddy": {}}, client=FakeClient([]),
+                                    specs=[Spec()], results=results)
+        self.assertEqual(got[0].fmt_today(), "已签")
 
 
 class CollectTest(unittest.TestCase):

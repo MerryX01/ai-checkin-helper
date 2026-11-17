@@ -5,6 +5,7 @@ from .base import FieldSpec, PlatformSpec
 from .registry import register
 
 WORKBUDDY_CHECKIN_PATH = "/billing/meter/daily-checkin"
+WORKBUDDY_STATUS_PATH = "/billing/meter/checkin-activity-status"
 WORKBUDDY_USAGE_PATH = "/billing/meter/get-user-resource-summary"
 DEFAULT_BASE_URL = "https://www.codebuddy.cn"
 CLIENT_DIR_NAMES = ("CodeBuddy CN", "WorkBuddy")
@@ -49,6 +50,55 @@ def _headers(section: dict, token: str) -> dict:
     return headers
 
 
+def _int(value) -> int | None:
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def activity_status(client, section: dict, token: str) -> dict | None:
+    """读「Buddy加油站」签到状态：今天签没签、今日积分、连续天数。
+
+    非 200 / 非 JSON / code 非 0 都返回 None（调用方按「状态不可用」处理）。
+    """
+    base = (section.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
+    resp = client.post(base + WORKBUDDY_STATUS_PATH, headers=_headers(section, token), json_body={})
+    if not resp.ok or not isinstance(resp.json, dict):
+        return None
+    if resp.json.get("code") not in (None, 0):
+        return None
+    data = resp.json.get("data")
+    return data if isinstance(data, dict) else None
+
+
+def _status_credit(status: dict | None) -> int | None:
+    if not status or status.get("today_checked_in") is not True:
+        return None
+    return _int(status.get("today_credit")) or _int(status.get("daily_credit"))
+
+
+def _status_line(status: dict | None) -> str:
+    if not status:
+        return ""
+    streak = _int(status.get("streak_days"))
+    credit = _status_credit(status)
+    parts = []
+    if credit:
+        parts.append(f"今天 +{credit} 积分已到账")
+    if streak:
+        parts.append(f"连续 {streak} 天")
+    return "，".join(parts)
+
+
+def _safe_status(client, section: dict, token: str) -> dict | None:
+    """状态接口是加分项：读不到不能让签到本身崩掉。"""
+    try:
+        return activity_status(client, section, token)
+    except Exception:
+        return None
+
+
 def run(client, section: dict, dry_run: bool = False) -> CheckinResult:
     token = (section.get("token") or "").strip()
     if not token:
@@ -72,10 +122,31 @@ def run(client, section: dict, dry_run: bool = False) -> CheckinResult:
     text = resp.text or ""
     # 服务端把"今天已签到"当作错误返回（HTTP 400 / code 10001），这属于幂等成功，不算失败
     if "已签到" in text or "already" in text.lower() or '"code":10001' in text.replace(" ", ""):
-        return _result(Status.ALREADY, "今日已签到，跳过", None, {"body": text[:300]})
+        status = _safe_status(client, section, token)
+        credit = _status_credit(status)
+        line = _status_line(status) if credit else ""
+        return _result(Status.ALREADY,
+                       "今日已签到" + (f"（{line}）" if line else "，跳过"),
+                       credit, {"body": text[:300], "status": status})
     if not resp.ok:
         return _result(Status.FAILED, f"签到接口失败：HTTP {resp.status} {resp.snippet()}")
-    return _result(Status.OK, "签到成功", None, {"body": text[:300]})
+
+    # 领取成功后回读状态，确认「今天已签 + 今天到账多少积分」，不把未确认写成成功。
+    status = _safe_status(client, section, token)
+    if status is not None:
+        if status.get("today_checked_in") is not True:
+            return _result(Status.FAILED,
+                           "领取接口返回成功，但签到状态仍显示今天未签（未确认到账）",
+                           None, {"body": text[:300], "status": status})
+        credit = _status_credit(status)
+        line = _status_line(status)
+        return _result(Status.OK,
+                       "签到成功" + (f"（{line}）" if line else "，已确认到账"),
+                       credit, {"body": text[:300], "status": status})
+    # 状态接口读不到时，不把「接口 200」包装成已到账。
+    return _result(Status.SKIPPED,
+                   "签到接口返回成功，但没能回读签到状态确认到账；稍后刷新额度看板确认",
+                   None, {"body": text[:300], "status": None})
 
 
 def quota(client, section: dict) -> QuotaSnapshot:
@@ -121,11 +192,30 @@ def quota(client, section: dict) -> QuotaSnapshot:
                         f"剩余 {fmt_number(group.get('CycleRemainCapacity'))} / "
                         f"总量 {fmt_number(group.get('CycleTotalCapacity'))}，"
                         f"已用 {fmt_number(group.get('CycleUsedCapacity'))}"))
+    # 签到活动状态：今日真实到账积分、连续天数（只读，不影响余额）。
+    status = _safe_status(client, section, token)
+    today_earned = _status_credit(status)
+    if status:
+        if status.get("activity_name"):
+            details.append(("签到活动", str(status["activity_name"])))
+        streak = _int(status.get("streak_days"))
+        if streak:
+            details.append(("连续签到", f"{streak} 天"))
+        week = _int(status.get("week_checkin_days"))
+        if week is not None:
+            details.append(("本周签到", f"{week} 天"))
+        if status.get("end_time"):
+            details.append(("活动截止", str(status["end_time"])))
+        if today_earned:
+            details.append(("今日签到", f"+{today_earned} credits（已到账）"))
     message = (f"余额 {fmt_number(balance)} / 总量 {fmt_number(total)} {unit}"
                if balance is not None else "已读取额度，但没有返回余额数字")
+    if today_earned:
+        message += f"；今日签到 +{today_earned} credits 已到账"
     return QuotaSnapshot("workbuddy", Status.OK, message, balance, total, used, unit,
+                         today_earned=today_earned,
                          details=details, source="POST codebuddy.cn /billing/meter/get-user-resource-summary",
-                         raw=body)
+                         raw={"usage": body, "status": status})
 
 
 def _num(value):

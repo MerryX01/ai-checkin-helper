@@ -106,6 +106,7 @@ class QuotaSnapshot:
     used: float | None = None
     unit: str = ""
     today_earned: float | None = None
+    today_text: str = ""
     expire_at: str = ""
     balance_text: str = ""
     used_text: str = ""
@@ -142,7 +143,9 @@ class QuotaSnapshot:
         return "—" if percent is None else f"{percent:.1%}"
 
     def fmt_today(self) -> str:
-        return "—" if self.today_earned is None else f"+{fmt_number(self.today_earned)}"
+        if self.today_earned is not None:
+            return f"+{fmt_number(self.today_earned)}"
+        return self.today_text or "—"
 
     def as_dict(self) -> dict:
         return {
@@ -154,6 +157,7 @@ class QuotaSnapshot:
             "used": self.used,
             "unit": self.unit,
             "today_earned": self.today_earned,
+            "today_text": self.today_text,
             "expire_at": self.expire_at,
             "details": self.details,
             "source": self.source,

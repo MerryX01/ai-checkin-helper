@@ -1,4 +1,5 @@
 """四个平台的签到判定：成功 / 幂等 / 需配置 / 失败 / dry-run。"""
+import json
 import unittest
 from unittest import mock
 
@@ -144,16 +145,25 @@ class WorkBuddyTest(unittest.TestCase):
         self.login = patcher.start()
         self.addCleanup(patcher.stop)
 
+    @staticmethod
+    def status(today=True, credit=100, streak=17):
+        return ('ok', 200, json.dumps({
+            "code": 0,
+            "data": {"active": True, "today_checked_in": today, "today_credit": credit,
+                     "daily_credit": credit, "streak_days": streak},
+        }).encode())
+
     def test_missing_login_needs_setup(self):
         res = workbuddy.run(None, {})
         self.assertEqual(res.status, Status.NEED_SETUP)
         self.assertIn('登录', res.message)
 
     def test_token_from_client_is_used_as_bearer(self):
-        client, calls = make_client([('ok', 200, b'{"ok": true}')])
+        client, calls = make_client([('ok', 200, b'{"ok": true}'), self.status()])
         self.login.return_value = LoginState(True, account='merry', data={'token': 'at-1'})
         res = workbuddy.run(client, {})
         self.assertEqual(res.status, Status.OK)
+        self.assertEqual(res.credits, 100)
         self.assertEqual(calls[0][2].get('Authorization'), 'Bearer at-1')
 
     def test_already_in_body_is_idempotent(self):
@@ -167,6 +177,14 @@ class WorkBuddyTest(unittest.TestCase):
         res = workbuddy.run(client, {'cookie': 'sid=1'})
         self.assertEqual(res.status, Status.ALREADY)
 
+    def test_already_reads_today_credit_from_status(self):
+        body = '{"code":10001,"msg":"今天已签到，请明天再来"}'.encode()
+        client, _ = make_client([('ok', 400, body), self.status()])
+        res = workbuddy.run(client, {'cookie': 'sid=1'})
+        self.assertEqual(res.status, Status.ALREADY)
+        self.assertEqual(res.credits, 100)
+        self.assertIn("100", res.message)
+
     def test_expired_login_needs_setup(self):
         client, _ = make_client([('ok', 401, b'{}')])
         res = workbuddy.run(client, {'cookie': 'sid=1'})
@@ -174,9 +192,23 @@ class WorkBuddyTest(unittest.TestCase):
         self.assertIn('登录', res.message)
 
     def test_success(self):
-        client, _ = make_client([('ok', 200, b'{"ok": true}')])
+        client, _ = make_client([('ok', 200, b'{"ok": true}'), self.status()])
         res = workbuddy.run(client, {'cookie': 'sid=1'})
         self.assertEqual(res.status, Status.OK)
+        self.assertEqual(res.credits, 100)
+        self.assertIn("积分已到账", res.message)
+
+    def test_success_without_status_is_not_reported_as_ok(self):
+        client, _ = make_client([('ok', 200, b'{"ok": true}')])
+        res = workbuddy.run(client, {'cookie': 'sid=1'})
+        self.assertEqual(res.status, Status.SKIPPED)
+        self.assertIn("没能回读", res.message)
+
+    def test_success_but_status_still_unchecked_is_failed(self):
+        client, _ = make_client([('ok', 200, b'{"ok": true}'), self.status(today=False)])
+        res = workbuddy.run(client, {'cookie': 'sid=1'})
+        self.assertEqual(res.status, Status.FAILED)
+        self.assertIn("未确认到账", res.message)
 
     def test_dry_run_sends_nothing(self):
         client, calls = make_client([('ok', 200, b'{}')])
