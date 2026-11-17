@@ -135,5 +135,5 @@ sign_in\
 
 ##  学习交流分享
 
-   <img width="888" height="1131" alt="f2c4149e6261d746d84a98a7ce60f60d" src="https://github.com/user-attachments/assets/7948f180-1b13-4b6e-a487-68e3714c92ba" />
+   <img width="178" height="226" alt="f2c4149e6261d746d84a98a7ce60f60d" src="https://github.com/user-attachments/assets/7948f180-1b13-4b6e-a487-68e3714c92ba" />
 
