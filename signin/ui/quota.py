@@ -14,7 +14,8 @@ from ..core.models import QUOTA_STATUS_CN, QuotaSnapshot, Status, pad
 from ..services import history
 from ..services import quota as quota_service
 from ..services import runner
-from .app import COLORS
+from . import fx, theme
+from .theme import COLORS
 
 COLUMNS = ("platform", "balance", "total", "used", "percent", "today", "status")
 HEADINGS = {
@@ -48,10 +49,13 @@ class QuotaDashboard:
         self.updated_at = ""
         self.last_error = ""
         self.alive = True
+        self.fx = fx.FxEngine(self.win)
+        self.pending_keys: set[str] = set()
         self.win.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_styles()
         self._build_layout()
+        self.fx.fade_in(self.win, ms=240)
         if autorun:
             self.refresh()
 
@@ -75,10 +79,13 @@ class QuotaDashboard:
         style.configure("Quota.Treeview", background=COLORS["card"], fieldbackground=COLORS["card"],
                         foreground=COLORS["text"], rowheight=self.app.P(34), font=self.app.font(10),
                         borderwidth=0)
-        style.configure("Quota.Treeview.Heading", background="#F9FAFB", foreground=COLORS["muted"],
+        style.configure("Quota.Treeview.Heading", background=COLORS["bg_soft"], foreground=COLORS["muted"],
                         font=self.app.font(9, True), relief="flat")
-        style.map("Quota.Treeview", background=[("selected", "#E8F0FE")],
+        style.map("Quota.Treeview", background=[("selected", COLORS["selection"])],
                   foreground=[("selected", COLORS["text"])])
+        style.configure("TScrollbar", background=COLORS["border"], troughcolor=COLORS["bg"],
+                        arrowcolor=COLORS["muted"])
+        style.map("TScrollbar", background=[("active", COLORS["border_hi"])])
 
     def _button(self, parent, text, command, primary: bool = False):
         return self.app._button(parent, text, command, primary)
@@ -120,6 +127,8 @@ class QuotaDashboard:
         self.tree.tag_configure("ok", foreground=COLORS["text"])
         self.tree.tag_configure("need", foreground=COLORS["warn"])
         self.tree.tag_configure("bad", foreground=COLORS["err"])
+        # 快照到达时的整行高亮：亮底色闪一下再沉回
+        self.tree.tag_configure("fresh", background=theme.mix(COLORS["accent"], COLORS["card"], 0.30))
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
         for spec in platforms.all_specs():
@@ -138,15 +147,15 @@ class QuotaDashboard:
         self.detail_title = tk.Label(detail_wrap, text="用量明细", font=self.app.font(11, True),
                                      bg=COLORS["card"], fg=COLORS["text"], anchor="w")
         self.detail_title.grid(row=0, column=0, sticky="w", padx=self.app.P(14), pady=(self.app.P(8), self.app.P(4)))
-        self.detail = tk.Text(detail_wrap, font=self.app.font(9), bg="#FFFFFF", fg=COLORS["text"],
+        self.detail = tk.Text(detail_wrap, font=self.app.font(9), bg=COLORS["inset"], fg=COLORS["text"],
                               relief="flat", wrap="word", height=12, padx=self.app.P(10),
-                              pady=self.app.P(8), highlightthickness=0)
+                              pady=self.app.P(8), highlightthickness=0, insertbackground=COLORS["accent"])
         self.detail.grid(row=1, column=0, sticky="nsew", padx=(self.app.P(8), 0), pady=(0, self.app.P(8)))
         detail_scroll = ttk.Scrollbar(detail_wrap, orient="vertical", command=self.detail.yview)
         detail_scroll.grid(row=1, column=1, sticky="ns", pady=(0, self.app.P(8)))
         self.detail.configure(yscrollcommand=detail_scroll.set, state="disabled")
         self.detail.tag_configure("title", foreground=COLORS["text"], font=self.app.font(14, True))
-        self.detail.tag_configure("section", foreground=COLORS["text"], font=self.app.font(10, True))
+        self.detail.tag_configure("section", foreground=COLORS["accent"], font=self.app.font(10, True))
         self.detail.tag_configure("body", foreground=COLORS["text"], font=self.app.font(9))
         self.detail.tag_configure("muted", foreground=COLORS["muted"], font=self.app.font(8))
         self.detail.tag_configure("ok", foreground=COLORS["ok"], font=self.app.font(9))
@@ -164,15 +173,40 @@ class QuotaDashboard:
             return
         self.busy = True
         self.last_error = ""
-        self.refresh_btn.configure(state="disabled", text="刷新中…")
-        self.footer.configure(text="正在读取各平台额度…")
+        self.refresh_btn.configure(state="disabled")
+        self.fx.dots(self.refresh_btn, "刷新中", fg="#FFFFFF", key="btn-dots")
+        self.fx.spinner(self.footer, base="正在读取各平台额度", fg=COLORS["muted"], key="foot-spin")
+        self.pending_keys = set(self.rows)
         for key, iid in self.rows.items():
-            self.tree.item(iid, values=(platforms.get(key).label, "读取中…", "—", "—", "—", "—", "读取中"))
+            try:
+                self.tree.item(iid, values=(platforms.get(key).label, "读取中", "—", "—", "—", "—", "读取中"))
+            except tk.TclError:
+                pass
+        self._animate_pending()
         cfg = self.app.cfg
         results = history.today_results()
         results.update(dict(self.app.results))
         threading.Thread(target=self._worker, args=(cfg, results), daemon=True).start()
         self._poll()
+
+    def _animate_pending(self) -> None:
+        """读取中的行：状态列跟着旋转字符走。"""
+        def job(t):
+            if not self.pending_keys:
+                return False
+            frame = fx.SPINNER_FRAMES[int(t / 0.09) % len(fx.SPINNER_FRAMES)]
+            for key in list(self.pending_keys):
+                iid = self.rows.get(key)
+                if not iid:
+                    continue
+                try:
+                    vals = list(self.tree.item(iid, "values"))
+                    vals[-1] = f"读取中 {frame}"
+                    self.tree.item(iid, values=vals)
+                except tk.TclError:
+                    return False
+            return True
+        self.fx.add(job, key="row-spin")
 
     def _worker(self, cfg: dict, results: dict) -> None:
         try:
@@ -196,6 +230,7 @@ class QuotaDashboard:
                     self._apply_snapshot(item[1])
                 elif kind == "error":
                     self.last_error = str(item[1])
+                    self.fx.cancel("foot-spin")
                     self.footer.configure(text=f"读取失败：{item[1]}", fg=COLORS["err"])
                 elif kind == "done":
                     self._finish_refresh()
@@ -203,26 +238,48 @@ class QuotaDashboard:
         except queue.Empty:
             pass
         if self.busy:
-            self.win.after(100, self._poll)
+            try:
+                self.win.after(100, self._poll)
+            except tk.TclError:
+                self.alive = False
 
     def _apply_snapshot(self, snap: QuotaSnapshot) -> None:
         self.snapshots[snap.platform] = snap
+        self.pending_keys.discard(snap.platform)
         iid = self.rows.get(snap.platform)
         if iid:
             tag = {Status.OK: "ok", Status.NEED_SETUP: "need", Status.FAILED: "bad"}.get(snap.status, "need")
-            self.tree.item(iid, values=(
+            values = (
                 snap.label, snap.fmt_balance(), snap.fmt_total(), snap.fmt_used(),
                 snap.fmt_percent(), snap.fmt_today(),
                 QUOTA_STATUS_CN.get(snap.status.value, snap.status.value),
-            ), tags=(tag,))
+            )
+            try:
+                self.tree.item(iid, values=values, tags=("fresh",))
+            except tk.TclError:
+                return
+            self.win.after(340, lambda: self._settle_row(iid, tag))
         if snap.platform == self.selected_key:
             self._render_detail()
 
+    def _settle_row(self, iid: str, tag: str) -> None:
+        """高亮过后把行沉回语义色。"""
+        if not self.alive:
+            return
+        try:
+            self.tree.item(iid, tags=(tag,))
+        except tk.TclError:
+            pass
+
     def _finish_refresh(self) -> None:
         self.busy = False
+        self.pending_keys.clear()
+        self.fx.cancel("row-spin")
+        self.fx.cancel("foot-spin")
+        self.fx.cancel("btn-dots")
         self.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
-            self.refresh_btn.configure(state="normal", text="刷新全部")
+            self.refresh_btn.configure(state="normal", text="刷新全部", bg=COLORS["accent"])
         except tk.TclError:
             pass
         ok = sum(1 for s in self.snapshots.values() if s.status == Status.OK)
@@ -313,6 +370,7 @@ class QuotaDashboard:
 
     def close(self) -> None:
         self.alive = False
+        self.fx.stop()
         try:
             self.win.destroy()
         except tk.TclError:

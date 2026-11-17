@@ -160,8 +160,10 @@ def task_state() -> str:
     """返回计划任务状态的简短描述（Windows 用 schtasks 查询）。"""
     import subprocess
     try:
+        # schtasks 输出控制台 OEM 编码（中文系统是 GBK）；UTF-8 环境下硬解会炸读取线程，
+        # 用 mbcs + replace 双保险：解码错也不抛。
         out = subprocess.run(["schtasks", "/Query", "/TN", "SignInDailyCheckin", "/FO", "LIST"],
-                             capture_output=True, text=True, timeout=10)
+                             capture_output=True, encoding="mbcs", errors="replace", timeout=10)
     except Exception as e:
         return f"查询失败：{type(e).__name__}"
     # pythonw 下没有控制台，stdout/stderr 可能是 None，不能直接 splitlines
