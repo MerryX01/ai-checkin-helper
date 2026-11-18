@@ -20,7 +20,6 @@
 
 Trae 的登录信息是客户端自己的加密格式，本工程用纯 Python 复刻了解密（算法来自公开实现 G57651/dsh-dual-checkin，MIT），
 所以同样是「登录一次就行」，不需要令牌、不需要校准。只有在读不到登录态时，才保留「点客户端按钮」作为可选的兜底（默认关闭）。
-
 界面右侧的「登录状态」区会实时显示是不是已经读到凭证；读不到就提示"去客户端登录一次"，不会要求你粘贴任何东西。
 
 ### 额度看板 / 用量明细
@@ -101,7 +100,7 @@ sign_in\
 ├─ docs\
 │  ├─ architecture.png        分层架构图（scripts\draw_architecture.py 生成）
 │  ├─ ARCHITECTURE.md         分层与数据流
-│  ├─ PRINCIPLES_AND_COMPARISON.md  原理 / 封号风险 / 与 dsh-checkin-all 对比
+│  ├─ PRINCIPLES_AND_COMPARISON.md  原理 / 封号风险 / 
 │  ├─ ADDING_A_PLATFORM.md    加一个平台要改什么（只改一个文件）
 │  └─ TROUBLESHOOTING.md      常见故障
 ├─ signin\
@@ -135,5 +134,5 @@ sign_in\
 
 ##  学习交流分享
 
-   <img width="178" height="226" alt="f2c4149e6261d746d84a98a7ce60f60d" src="https://github.com/user-attachments/assets/7948f180-1b13-4b6e-a487-68e3714c92ba" />
+   <img width="226" height="226" alt="f2c4149e6261d746d84a98a7ce60f60d" src="https://github.com/user-attachments/assets/7948f180-1b13-4b6e-a487-68e3714c92ba" />
 
