@@ -1,3 +1,4 @@
+
 # 每日自动签到 · Qoder / WorkBuddy / Trae CN / 豆包
 
 **一句话：你在客户端登录一次，之后每天它就自己签到——不用填 API、不用填令牌、不用填 Cookie。**
@@ -103,7 +104,7 @@ sign_in\
 ├─ docs\
 │  ├─ architecture.png        分层架构图（scripts\draw_architecture.py 生成）
 │  ├─ ARCHITECTURE.md         分层与数据流
-│  ├─ PRINCIPLES_AND_COMPARISON.md  原理 / 封号风险 / 与 dsh-checkin-all 对比
+│  ├─ PRINCIPLES_AND_COMPARISON.md  原理 / 封号风险 / 
 │  ├─ ADDING_A_PLATFORM.md    加一个平台要改什么（只改一个文件）
 │  └─ TROUBLESHOOTING.md      常见故障
 ├─ signin\
@@ -133,4 +134,5 @@ sign_in\
 
 - 凭证始终留在本机，程序只读不写、不上传。
 - 定时任务用 `wscript.exe` 拉起 `run_hidden.vbs`，运行时不会弹黑窗口。
-- 想清掉登录态？在对应客户端里退出登录即可，程序下一次就会提示"去客户端登录一次"。
+- 想清掉登录态？在对应客户端里退出登录即可，程序下一次就会提示"去客户端登录一次"
+---
