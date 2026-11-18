@@ -66,6 +66,22 @@ class TraeTest(unittest.TestCase):
         self.assertEqual(res.status, Status.NEED_SETUP)
         self.assertIn('校准', res.message)
 
+    def test_check_accepts_calibrated_gui_fallback(self):
+        # 干净环境读不到登录态，但已开启兜底并校准过位置：不应再报缺少配置
+        section = {'gui_fallback': True,
+                   'gui_click': {'window': 'Trae CN', 'x_ratio': 0.5, 'y_ratio': 0.9}}
+        self.assertEqual(trae.check(section), [])
+        self.login.assert_not_called()
+
+    def test_check_flags_fallback_without_calibration(self):
+        problems = trae.check({'gui_fallback': True})
+        self.assertEqual(len(problems), 1)
+        self.assertIn('校准', problems[0])
+
+    def test_check_token_is_ready_without_login_state(self):
+        self.assertEqual(trae.check({'token': 'jwt-1'}), [])
+        self.login.assert_not_called()
+
     def test_token_from_client_login_state_is_used(self):
         client, calls = make_client([
             ('ok', 200, b'{"code": 0, "checked_in": true, "data": {"credits": 120}}'),

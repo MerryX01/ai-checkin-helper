@@ -17,18 +17,10 @@ from .. import VERSION, apps, gui as gui_mod, platforms
 from ..core import config
 from ..core.models import STATUS_CN, Status
 from ..services import history, runner, settings
+from . import fx, theme
 
-COLORS = {
-    "bg": "#F3F4F6",
-    "card": "#FFFFFF",
-    "border": "#E5E7EB",
-    "text": "#111827",
-    "muted": "#6B7280",
-    "accent": "#2563EB",
-    "ok": "#16A34A",
-    "warn": "#B45309",
-    "err": "#DC2626",
-}
+# 历史兼容：quota.py 等模块从 app.COLORS 取色；统一改走 theme.COLORS
+COLORS = theme.COLORS
 
 TITLE_PREFIX = "每日自动签到"
 TASK_NAME_NOTE = "Windows 计划任务（任务名 SignInDailyCheckin）"
@@ -55,6 +47,7 @@ class SignInApp:
 
         self.scale = max(1.0, self.root.winfo_fpixels("1i") / 96.0)
         self._setup_geometry()
+        self.fx = fx.FxEngine(self.root)
         self._setup_styles()
 
         self.path = str(config.ROOT / config.CONFIG_NAME)
@@ -65,6 +58,7 @@ class SignInApp:
         self.results: dict[str, object] = {}
         self.login_cache: dict[str, object] = {}
         self.show_advanced = False
+        self._pulsed_card = None
         self.queue: queue.Queue = queue.Queue()
         self.current = platforms.all_specs()[0].key if platforms.all_specs() else ""
         self.running = False
@@ -86,6 +80,7 @@ class SignInApp:
         self._refresh_cards()
         self._select(self.current)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.fx.fade_in(self.root, ms=280)
         self._bring_to_front()
         self._write_launch_mark()
 
@@ -117,9 +112,13 @@ class SignInApp:
                         font=self.font(10), padding=self.P(2))
         style.configure("Bg.TCheckbutton", background=COLORS["bg"], foreground=COLORS["text"],
                         font=self.font(10), padding=self.P(2))
-        style.map("Card.TCheckbutton", background=[("active", COLORS["card"])])
-        style.map("Bg.TCheckbutton", background=[("active", COLORS["bg"])])
-        style.configure("TScrollbar", background=COLORS["border"], troughcolor=COLORS["bg"])
+        style.map("Card.TCheckbutton", background=[("active", COLORS["card"])],
+                  foreground=[("active", COLORS["accent"])])
+        style.map("Bg.TCheckbutton", background=[("active", COLORS["bg"])],
+                  foreground=[("active", COLORS["accent"])])
+        style.configure("TScrollbar", background=COLORS["border"], troughcolor=COLORS["bg"],
+                        arrowcolor=COLORS["muted"], bordercolor=COLORS["bg"])
+        style.map("TScrollbar", background=[("active", COLORS["border_hi"])])
 
     def _bring_to_front(self) -> None:
         """全屏浏览器会盖住新窗口：先置顶，再把焦点抢过来，1.2 秒后取消置顶。"""
@@ -146,8 +145,8 @@ class SignInApp:
     # ------------------------------------------------------------ 布局
     def _build_layout(self) -> None:
         self.root.grid_columnconfigure(0, weight=1)
-        self.root.grid_rowconfigure(1, weight=3)
-        self.root.grid_rowconfigure(4, weight=1, minsize=self.P(96))
+        self.root.grid_rowconfigure(2, weight=3)
+        self.root.grid_rowconfigure(5, weight=1, minsize=self.P(96))
 
         header = tk.Frame(self.root, bg=COLORS["bg"])
         header.grid(row=0, column=0, sticky="ew", padx=self.P(20), pady=(self.P(16), self.P(6)))
@@ -167,13 +166,19 @@ class SignInApp:
         path_label.pack(anchor="e")
         open_btn = tk.Button(right, text="打开项目文件夹", font=self.font(8), bd=0,
                              bg=COLORS["bg"], fg=COLORS["accent"], activebackground=COLORS["bg"],
-                             cursor="hand2", command=self._open_project_dir)
+                             activeforeground=COLORS["text"], cursor="hand2",
+                             command=self._open_project_dir)
         open_btn.pack(anchor="e", pady=(self.P(2), 0))
+        open_btn.bind("<Enter>", lambda _e: open_btn.configure(fg=COLORS["accent2"]))
+        open_btn.bind("<Leave>", lambda _e: open_btn.configure(fg=COLORS["accent"]))
         tk.Label(right, text=f"v{VERSION}", font=self.font(8),
                  bg=COLORS["bg"], fg=COLORS["muted"]).pack(anchor="e")
 
+        # 能量条：静态渐变线 + 两道循环扫光（科技感主题的视觉锚点）
+        self._build_energy()
+
         body = tk.Frame(self.root, bg=COLORS["bg"])
-        body.grid(row=1, column=0, sticky="nsew", padx=self.P(20))
+        body.grid(row=2, column=0, sticky="nsew", padx=self.P(20))
         body.grid_columnconfigure(0, weight=0, minsize=self.P(300))
         body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
@@ -184,12 +189,14 @@ class SignInApp:
         head = tk.Frame(left, bg=COLORS["bg"])
         head.pack(fill="x", pady=(0, self.P(6)))
         tk.Label(head, text="① 选择平台", font=self.font(11, True),
-                 bg=COLORS["bg"], fg=COLORS["text"], anchor="w").pack(side="left")
+                 bg=COLORS["bg"], fg=COLORS["accent"], anchor="w").pack(side="left")
         for text, state in (("全不选", False), ("全选", True)):
             link = tk.Label(head, text=text, font=self.font(8), bg=COLORS["bg"],
                             fg=COLORS["accent"], cursor="hand2")
             link.pack(side="right", padx=(self.P(8), 0))
             link.bind("<Button-1>", lambda _e, s=state: self._set_all(s))
+            link.bind("<Enter>", lambda _e, w=link: w.configure(fg=COLORS["accent2"]))
+            link.bind("<Leave>", lambda _e, w=link: w.configure(fg=COLORS["accent"]))
         self.cards_holder = tk.Frame(left, bg=COLORS["bg"])
         self.cards_holder.pack(fill="x", anchor="n")
         tk.Label(left, text="勾选框 = 是否参与签到；点卡片查看右边设置",
@@ -203,7 +210,7 @@ class SignInApp:
         right_col = tk.Frame(body, bg=COLORS["bg"])
         right_col.grid(row=0, column=1, sticky="nsew")
         tk.Label(right_col, text="② 平台设置", font=self.font(11, True), bg=COLORS["bg"],
-                 fg=COLORS["text"], anchor="w").pack(fill="x", pady=(0, self.P(6)))
+                 fg=COLORS["accent"], anchor="w").pack(fill="x", pady=(0, self.P(6)))
         self.detail = tk.Frame(right_col, bg=COLORS["card"], highlightthickness=1,
                                highlightbackground=COLORS["border"])
         self.detail.pack(fill="both", expand=True)
@@ -211,12 +218,14 @@ class SignInApp:
         # ③ 每天自动
         schedule = tk.Frame(self.root, bg=COLORS["card"], highlightthickness=1,
                             highlightbackground=COLORS["border"])
-        schedule.grid(row=2, column=0, sticky="ew", padx=self.P(20), pady=(self.P(12), 0))
+        schedule.grid(row=3, column=0, sticky="ew", padx=self.P(20), pady=(self.P(12), 0))
         tk.Label(schedule, text="③ 每天自动", font=self.font(11, True), bg=COLORS["card"],
-                 fg=COLORS["text"]).pack(side="left", padx=(self.P(14), self.P(10)), pady=self.P(10))
+                 fg=COLORS["accent"]).pack(side="left", padx=(self.P(14), self.P(10)), pady=self.P(10))
         tk.Entry(schedule, textvariable=self.time_var, font=self.font(10), width=6,
-                 justify="center", relief="flat", bg="#FFFFFF", highlightthickness=1,
-                 highlightbackground=COLORS["border"]).pack(side="left", ipady=self.P(3))
+                 justify="center", relief="flat", bg=COLORS["inset"], fg=COLORS["text"],
+                 insertbackground=COLORS["accent"], highlightthickness=1,
+                 highlightbackground=COLORS["border"],
+                 highlightcolor=COLORS["accent"]).pack(side="left", ipady=self.P(3))
         tk.Label(schedule, text="(HH:MM，" + TASK_NAME_NOTE + ")", font=self.font(8),
                  bg=COLORS["card"], fg=COLORS["muted"]).pack(side="left", padx=(self.P(8), self.P(12)))
         self._button(schedule, "注册定时任务", self._install_task, primary=False).pack(side="left")
@@ -227,7 +236,7 @@ class SignInApp:
 
         # 操作行
         actions = tk.Frame(self.root, bg=COLORS["bg"])
-        actions.grid(row=3, column=0, sticky="ew", padx=self.P(20), pady=(self.P(10), self.P(6)))
+        actions.grid(row=4, column=0, sticky="ew", padx=self.P(20), pady=(self.P(10), self.P(6)))
         ttk.Checkbutton(actions, text="试运行（只打印将要发出的请求，不真签到）",
                         variable=self.dry_var, style="Bg.TCheckbutton").pack(side="left")
         self._button(actions, "保存配置", self._save_clicked, primary=False).pack(side="left", padx=self.P(12))
@@ -237,15 +246,17 @@ class SignInApp:
         self.ready_label.pack(side="left", padx=self.P(8))
         self.run_button = self._button(actions, "立即签到", self._run_clicked, primary=True)
         self.run_button.pack(side="right")
+        self._run_idle_fx()
 
         # 日志
         log_wrap = tk.Frame(self.root, bg=COLORS["bg"])
-        log_wrap.grid(row=4, column=0, sticky="nsew", padx=self.P(20), pady=(0, self.P(14)))
+        log_wrap.grid(row=5, column=0, sticky="nsew", padx=self.P(20), pady=(0, self.P(14)))
         log_wrap.grid_columnconfigure(0, weight=1)
         log_wrap.grid_rowconfigure(0, weight=1)
-        self.log = tk.Text(log_wrap, font=self.font(9), bg="#FFFFFF", fg=COLORS["text"],
+        self.log = tk.Text(log_wrap, font=self.font(9), bg=COLORS["inset"], fg=COLORS["text"],
                            relief="flat", highlightthickness=1, highlightbackground=COLORS["border"],
-                           wrap="word", height=4, padx=self.P(10), pady=self.P(8))
+                           wrap="word", height=4, padx=self.P(10), pady=self.P(8),
+                           insertbackground=COLORS["accent"])
         self.log.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(log_wrap, orient="vertical", command=self.log.yview)
         scroll.grid(row=0, column=1, sticky="ns")
@@ -253,19 +264,75 @@ class SignInApp:
         self.log.tag_configure("muted", foreground=COLORS["muted"])
         self.log.tag_configure("ok", foreground=COLORS["ok"])
         self.log.tag_configure("err", foreground=COLORS["err"])
-        self.log.tag_configure("title", foreground=COLORS["text"], font=self.font(9, True))
+        self.log.tag_configure("title", foreground=COLORS["accent"], font=self.font(9, True))
+        # flash 最后创建 = 最高优先级：新日志先闪主色再沉回本色
+        self.log.tag_configure("flash", foreground=COLORS["text"])
         self.log.configure(state="disabled")
 
+    def _build_energy(self) -> None:
+        self.energy = tk.Canvas(self.root, height=self.P(3), bg=COLORS["bg"],
+                                highlightthickness=0, bd=0)
+        self.energy.grid(row=1, column=0, sticky="ew", padx=self.P(20))
+        self._energy_w = 0
+        self._energy_bands = []
+        self.energy.bind("<Configure>", self._on_energy_resize)
+
+    def _on_energy_resize(self, event) -> None:
+        if event.width < 60 or event.width == self._energy_w:
+            return
+        self._energy_w = event.width
+        try:
+            self.energy.delete("all")
+        except tk.TclError:
+            return
+        h = event.height
+        # 静态渐变线：accent → accent2 压暗，像一条通电的数据总线
+        n = max(2, event.width // 3)
+        for i in range(n):
+            t = i / (n - 1)
+            col = theme.mix(theme.mix(COLORS["accent_dim"], COLORS["accent2"], t),
+                            COLORS["bg"], 0.42)
+            x0 = i * event.width / n
+            x1 = (i + 1) * event.width / n + 0.5
+            self.energy.create_rectangle(x0, 0, x1, h, fill=col, outline="")
+        # 两道扫光：主色与辅色错拍循环
+        for j, (color, period) in enumerate(((COLORS["accent"], 4.6), (COLORS["accent2"], 7.9))):
+            band = self.energy.create_rectangle(-20, -1, -10, h + 1, fill=color, outline="")
+            self._energy_bands.append(band)
+            self.fx.sweep(self.energy, band, 0, event.width, -1, h + 1,
+                          period=period, key=("energy", j))
+
+    def _run_idle_fx(self) -> None:
+        """「立即签到」待机呼吸：主色 ↔ 辅色，慢节奏。"""
+        self.fx.pulse(self.run_button, "bg", COLORS["accent"], COLORS["accent_dim"],
+                      period=3.2, pause=0.7, key="run")
+
     def _button(self, parent, text, command, primary: bool):
-        return tk.Button(parent, text=text, command=command, font=self.font(9),
-                         bd=0, cursor="hand2",
-                         bg=COLORS["accent"] if primary else "#FFFFFF",
-                         fg="#FFFFFF" if primary else COLORS["text"],
-                         activebackground=COLORS["accent"] if primary else "#F9FAFB",
-                         activeforeground="#FFFFFF" if primary else COLORS["text"],
-                         highlightthickness=0 if primary else 1,
-                         highlightbackground=COLORS["border"],
-                         padx=self.P(14), pady=self.P(5))
+        btn = tk.Button(parent, text=text, command=command, font=self.font(9),
+                        bd=0, cursor="hand2",
+                        bg=COLORS["accent"] if primary else COLORS["card"],
+                        fg="#FFFFFF" if primary else COLORS["text"],
+                        activebackground=COLORS["accent2"] if primary else COLORS["card_hi"],
+                        activeforeground="#FFFFFF" if primary else COLORS["text"],
+                        highlightthickness=0 if primary else 1,
+                        highlightbackground=COLORS["border"],
+                        padx=self.P(14), pady=self.P(5))
+        # 悬停过渡：主按钮漂向辅色，次按钮亮面 + 描边提亮
+        if primary:
+            btn.bind("<Enter>", lambda _e: self.fx.transition(btn, "bg", COLORS["accent"],
+                                                              COLORS["accent2"], ms=140))
+            btn.bind("<Leave>", lambda _e: self.fx.transition(btn, "bg", COLORS["accent2"],
+                                                              COLORS["accent"], ms=140))
+        else:
+            btn.bind("<Enter>", lambda _e: (self.fx.transition(btn, "bg", COLORS["card"],
+                                                               COLORS["card_hi"], ms=120),
+                                            self.fx.transition(btn, "border", COLORS["border"],
+                                                               COLORS["border_hi"], ms=120)))
+            btn.bind("<Leave>", lambda _e: (self.fx.transition(btn, "bg", COLORS["card_hi"],
+                                                               COLORS["card"], ms=120),
+                                            self.fx.transition(btn, "border", COLORS["border_hi"],
+                                                               COLORS["border"], ms=120)))
+        return btn
 
     def _build_card(self, spec) -> None:
         card = tk.Frame(self.cards_holder, bg=COLORS["card"], highlightthickness=1,
@@ -288,9 +355,24 @@ class SignInApp:
 
         for widget in (card, name, status):
             widget.bind("<Button-1>", lambda _e, k=spec.key: self._select(k))
+        # 悬停：面提亮 + 描边提亮（选中卡的描边归呼吸灯管，只动面）
+        card.bind("<Enter>", lambda _e, k=spec.key: self._card_hover(k, True))
+        card.bind("<Leave>", lambda _e, k=spec.key: self._card_hover(k, False))
 
         self.panel_cards[spec.key] = {"card": card, "check": chk_var, "mark": mark,
-                                       "status": status, "name": name}
+                                      "status": status, "name": name,
+                                      "st_pulsing": None}
+
+    def _card_hover(self, key: str, entered: bool) -> None:
+        entry = self.panel_cards.get(key)
+        if entry is None:
+            return
+        selected = key == self.current
+        bg_to, bg_from = (COLORS["card_hi"], COLORS["card"]) if entered else (COLORS["card"], COLORS["card_hi"])
+        self.fx.transition(entry["card"], "bg", bg_from, bg_to, ms=130, key=("hover-bg", key))
+        if not selected:
+            b_to, b_from = (COLORS["border_hi"], COLORS["border"]) if entered else (COLORS["border"], COLORS["border_hi"])
+            self.fx.transition(entry["card"], "border", b_from, b_to, ms=130, key=("hover-bd", key))
 
     # ------------------------------------------------------------ 卡片交互
     def _refresh_cards(self) -> None:
@@ -301,9 +383,27 @@ class SignInApp:
             entry["mark"].configure(text="☑" if on else "☐",
                                     fg=COLORS["accent"] if on else COLORS["muted"])
             text, color = self._card_status(spec.key)
-            entry["status"].configure(text=text, fg=color)
-            entry["card"].configure(highlightbackground=(
-                COLORS["accent"] if spec.key == self.current else COLORS["border"]))
+            entry["status"].configure(text=f"● {text}" if text else "", fg=color)
+            # 选中卡的描边交给呼吸灯；换卡时同 key 自动顶掉旧灯
+            if spec.key == self.current and self._pulsed_card != spec.key:
+                if self._pulsed_card and self._pulsed_card in self.panel_cards:
+                    try:
+                        old = self.panel_cards[self._pulsed_card]["card"]
+                        old.configure(highlightbackground=COLORS["border"], bg=COLORS["card"])
+                    except tk.TclError:
+                        pass
+                self.fx.pulse(entry["card"], "border", COLORS["accent_dim"], COLORS["accent"],
+                              period=2.2, pause=0.5, key="card-border")
+                self._pulsed_card = spec.key
+            # 就绪/成功状态：绿点呼吸；其他状态收掉呼吸恢复静态
+            if color == COLORS["ok"] and not entry["st_pulsing"]:
+                self.fx.pulse(entry["status"], "fg", COLORS["ok"],
+                              theme.mix(COLORS["ok"], COLORS["bg"], 0.45),
+                              period=1.8, pause=0.5, key=("st", spec.key))
+                entry["st_pulsing"] = True
+            elif color != COLORS["ok"] and entry["st_pulsing"]:
+                self.fx.cancel(("st", spec.key))
+                entry["st_pulsing"] = False
 
         enabled = settings.enabled_platforms(self.form)
         ready = [p for p in enabled if settings.ready(self.form, p)]
@@ -375,14 +475,14 @@ class SignInApp:
 
         self._build_actions(fields, spec, row + 1)
 
-        result_box = tk.Frame(self.detail, bg="#F9FAFB", highlightthickness=1,
+        result_box = tk.Frame(self.detail, bg=COLORS["inset"], highlightthickness=1,
                               highlightbackground=COLORS["border"])
         result_box.pack(side="bottom", fill="x", padx=self.P(20), pady=(self.P(10), self.P(18)))
-        tk.Label(result_box, text="最近一次结果", font=self.font(8), bg="#F9FAFB",
+        tk.Label(result_box, text="最近一次结果", font=self.font(8), bg=COLORS["inset"],
                  fg=COLORS["muted"], anchor="w").pack(fill="x", padx=self.P(12), pady=(self.P(8), 0))
         result = self.results.get(spec.key)
         text = "还没跑过" if result is None else f"{STATUS_CN.get(result.status.value, '')} · {result.message}"
-        tk.Label(result_box, text=text, font=self.font(9), bg="#F9FAFB",
+        tk.Label(result_box, text=text, font=self.font(9), bg=COLORS["inset"],
                  fg=COLORS["text"] if result else COLORS["muted"], anchor="w", justify="left",
                  wraplength=self.P(660)).pack(fill="x", padx=self.P(12), pady=(self.P(2), self.P(10)))
 
@@ -405,11 +505,18 @@ class SignInApp:
             mark.bind("<Button-1>", lambda _e, v=var, m=mark: self._toggle_bool(v, m))
             return row + 1
 
-        entry = tk.Entry(parent, textvariable=var, font=self.font(9), bg="#FFFFFF", relief="flat",
+        entry = tk.Entry(parent, textvariable=var, font=self.font(9), bg=COLORS["inset"],
+                         fg=COLORS["text"], insertbackground=COLORS["accent"], relief="flat",
                          highlightthickness=1, highlightbackground=COLORS["border"],
                          highlightcolor=COLORS["accent"],
                          show="*" if fld.kind == "secret" else "")
         entry.grid(row=row, column=1, sticky="ew", pady=(self.P(8), 0), ipady=self.P(3))
+        entry.bind("<FocusIn>", lambda _e: self.fx.transition(entry, "border",
+                                                              COLORS["border"], COLORS["accent"],
+                                                              ms=150, key=("focus", id(entry))))
+        entry.bind("<FocusOut>", lambda _e: self.fx.transition(entry, "border",
+                                                               COLORS["accent"], COLORS["border"],
+                                                               ms=150, key=("focus", id(entry))))
 
         buttons = tk.Frame(parent, bg=COLORS["card"])
         buttons.grid(row=row, column=2, sticky="w", padx=(self.P(8), 0), pady=(self.P(8), 0))
@@ -462,7 +569,7 @@ class SignInApp:
 
     def _build_login_box(self, spec) -> None:
         """「登录一次就行」这一区的界面：显示当前是不是已经读到登录态。"""
-        box = tk.Frame(self.detail, bg="#F6F8F7", highlightthickness=1,
+        box = tk.Frame(self.detail, bg=COLORS["bg_soft"], highlightthickness=1,
                        highlightbackground=COLORS["border"])
         box.pack(fill="x", padx=self.P(20), pady=(self.P(12), 0))
         state = self._login_state_for(spec.key) if spec.login_state is not None else None
@@ -477,20 +584,22 @@ class SignInApp:
         else:
             text, color = f"未登录：{state.message or spec.login_hint}", COLORS["warn"]
 
-        row = tk.Frame(box, bg="#F6F8F7")
+        row = tk.Frame(box, bg=COLORS["bg_soft"])
         row.pack(fill="x", padx=self.P(12), pady=self.P(8))
-        tk.Label(row, text="登录状态", font=self.font(8), bg="#F6F8F7",
+        tk.Label(row, text="登录状态", font=self.font(8), bg=COLORS["bg_soft"],
                  fg=COLORS["muted"]).pack(side="left")
-        tk.Label(row, text=text, font=self.font(9), bg="#F6F8F7", fg=color, anchor="w",
+        tk.Label(row, text=text, font=self.font(9), bg=COLORS["bg_soft"], fg=color, anchor="w",
                  justify="left", wraplength=self.P(400)).pack(side="left", padx=(self.P(10), 0), fill="x")
 
         if spec.login_state is not None:
             self._button(row, "刷新", self._refresh_login, primary=False).pack(side="right")
         if any(fld.advanced for fld in spec.fields):
             toggle = tk.Label(row, text=("收起高级项" if self.show_advanced else "显示高级项"),
-                              font=self.font(8), bg="#F6F8F7", fg=COLORS["accent"], cursor="hand2")
+                              font=self.font(8), bg=COLORS["bg_soft"], fg=COLORS["accent"], cursor="hand2")
             toggle.pack(side="right", padx=(0, self.P(10)))
             toggle.bind("<Button-1>", lambda _e: self._toggle_advanced())
+            toggle.bind("<Enter>", lambda _e: toggle.configure(fg=COLORS["accent2"]))
+            toggle.bind("<Leave>", lambda _e: toggle.configure(fg=COLORS["accent"]))
 
     def _toggle_bool(self, var, mark) -> None:
         var.set(not bool(var.get()))
@@ -561,6 +670,10 @@ class SignInApp:
             self._log("没抓到窗口，校准失败", "err")
             return
         self.cfg.setdefault(key, {})["gui_click"] = point
+        # 校准即启用点击兜底，避免保存配置时被表单默认值关掉
+        self.cfg[key]["gui_fallback"] = True
+        if "gui_fallback" in self.form[key]:
+            self.form[key]["gui_fallback"] = True
         self.form[key]["gui_click_ready"] = True
         self._save(silent=True)
         self._log(f"已校准：窗口「{point['window']}」 位置 {point['x_ratio']:.2f}/{point['y_ratio']:.2f}", "ok")
@@ -657,7 +770,11 @@ class SignInApp:
     def _start_run(self, dry_run: bool) -> None:
         self.running = True
         self.last_dry_run = bool(dry_run)
-        self.run_button.configure(state="disabled", text="执行中…")
+        self.run_button.configure(state="disabled")
+        self.fx.cancel("run")
+        self.fx.dots(self.run_button, "执行中", fg="#FFFFFF", key="run-dots")
+        self.fx.pulse(self.run_button, "bg", COLORS["accent"], COLORS["accent2"],
+                      period=1.1, pause=0.0, key="run")
         self.status_var.set("")
         self._clear_log()
         self._log(("开始试运行" if dry_run else "开始签到") + f"（{len(settings.enabled_platforms(self.form))} 个平台）", "title")
@@ -713,7 +830,10 @@ class SignInApp:
         else:
             self._log("没有平台被执行（可能都没勾选，或都缺配置）", "muted")
         self.running = False
-        self.run_button.configure(state="normal", text="立即签到")
+        self.fx.cancel("run")
+        self.fx.cancel("run-dots")
+        self.run_button.configure(state="normal", text="立即签到", bg=COLORS["accent"])
+        self._run_idle_fx()
         self._refresh_cards()
 
     # ------------------------------------------------------------ 日志
@@ -721,9 +841,18 @@ class SignInApp:
         import datetime
         stamp = datetime.datetime.now().strftime("%H:%M:%S")
         self.log.configure(state="normal")
-        self.log.insert("end", f"[{stamp}] {text}\n", tag)
+        self.log.insert("end", f"[{stamp}] {text}\n", (tag, "flash"))
+        end = self.log.index("end-1c")
         self.log.see("end")
         self.log.configure(state="disabled")
+        # 新行先亮一下主色，320ms 后沉回本色（flash 优先级高于业务 tag）
+        self.root.after(320, lambda: self._unflash(end))
+
+    def _unflash(self, end: str) -> None:
+        try:
+            self.log.tag_remove("flash", f"{end} linestart", end)
+        except tk.TclError:
+            pass
 
     def _clear_log(self) -> None:
         self.log.configure(state="normal")
@@ -732,6 +861,7 @@ class SignInApp:
 
     # ------------------------------------------------------------ 收尾
     def _on_close(self) -> None:
+        self.fx.stop()
         try:
             if not self.running:
                 self._save(silent=True)

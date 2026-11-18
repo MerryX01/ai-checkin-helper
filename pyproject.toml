@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sign-in-tools"
-version = "2.2.2"
+version = "2.3.0"
 description = "每日自动签到：Qoder / WorkBuddy / Trae CN / 豆包（读本机客户端登录态，零第三方依赖）"
 requires-python = ">=3.10"
 dependencies = []
